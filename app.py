@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
-from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 from pinecone import Pinecone
+import requests
 import os
 from langdetect import detect
 
@@ -12,8 +12,10 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index("farmer-chatbot")
 
-# Initialize the embedding model
-model = SentenceTransformer('intfloat/multilingual-e5-base')
+# Hugging Face API for embeddings
+HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
+HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction"
+HF_MODEL_ID = "intfloat/multilingual-e5-base"
 
 app = Flask(__name__)
 
@@ -25,11 +27,40 @@ def get_language_from_query(query):
     except:
         return 'en'  # Default to English if detection fails
 
+def get_embeddings_from_hf(text):
+    """Get embeddings from Hugging Face Inference API"""
+    try:
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        payload = {
+            "inputs": text,
+            "options": {"use_cache": False}
+        }
+        
+        response = requests.post(
+            HF_INFERENCE_API_URL,
+            headers=headers,
+            json=payload,
+            params={"model": HF_MODEL_ID}
+        )
+        
+        if response.status_code == 200:
+            embedding = response.json()
+            return embedding
+        else:
+            print(f"HF API Error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error getting embeddings: {e}")
+        return None
+
 def get_context_from_pinecone(query, k=4):
     """Query Pinecone to get top 4 relevant results"""
     try:
-        # Create embedding for the query
-        query_embedding = model.encode(query).tolist()
+        # Get embedding from Hugging Face API
+        query_embedding = get_embeddings_from_hf(query)
+        
+        if not query_embedding:
+            return ""
         
         # Query Pinecone for top k results
         results = index.query(

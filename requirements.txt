@@ -1,8 +1,6 @@
 Flask
-sentence-transformers
-pandas
-numpy
 google-generativeai
 gunicorn
 pinecone-client
 langdetect
+requests
