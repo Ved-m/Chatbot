@@ -41,21 +41,26 @@ def get_embeddings_from_hf(text):
             "options": {"use_cache": False}
         }
         
+        print(f"[DEBUG] Calling HF API for embeddings...")
         response = requests.post(
             HF_INFERENCE_API_URL,
             headers=headers,
             json=payload,
-            params={"model": HF_MODEL_ID}
+            params={"model": HF_MODEL_ID},
+            timeout=30
         )
+        
+        print(f"[DEBUG] HF API response status: {response.status_code}")
         
         if response.status_code == 200:
             embedding = response.json()
+            print(f"[DEBUG] Embedding received, size: {len(embedding) if isinstance(embedding, list) else 'unknown'}")
             return embedding
         else:
-            print(f"HF API Error: {response.status_code} - {response.text}")
+            print(f"[ERROR] HF API Error: {response.status_code} - {response.text}")
             return None
     except Exception as e:
-        print(f"Error getting embeddings: {e}")
+        print(f"[ERROR] Error getting embeddings from HF: {e}")
         return None
 
 def get_context_from_pinecone(query, k=4):
@@ -97,14 +102,20 @@ def chat():
         return jsonify({"error": "Query is required"}), 400
 
     try:
+        print(f"[DEBUG] Received query: {user_query}")
+        
         # Detect the language of the query if not provided
         if not user_lang:
             user_lang = get_language_from_query(user_query)
+            print(f"[DEBUG] Detected language: {user_lang}")
         
         # Get relevant context from Pinecone
+        print("[DEBUG] Getting context from Pinecone...")
         context = get_context_from_pinecone(user_query, k=4)
+        print(f"[DEBUG] Context retrieved: {len(context)} characters")
         
         # Generate response using Gemini 2.5 Flash
+        print("[DEBUG] Generating response with Gemini...")
         gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = f"""You are a helpful assistant for Grape Master (a farming and agriculture chatbot).
@@ -119,6 +130,7 @@ def chat():
         Provide a helpful and accurate answer based on the context above. If the context doesn't have relevant information, provide the best answer you can based on your knowledge."""
         
         response = gemini_model.generate_content(prompt)
+        print(f"[DEBUG] Response generated successfully")
         
         return jsonify({
             "response": response.text,
@@ -126,7 +138,11 @@ def chat():
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_msg = str(e)
+        print(f"[ERROR] Exception occurred: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Server error: {error_msg}"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
