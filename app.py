@@ -3,6 +3,7 @@ import google.generativeai as genai
 from pinecone import Pinecone
 import os
 from langdetect import detect
+import requests
 
 # Configure the Gemini API key
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
@@ -10,6 +11,11 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 # Initialize Pinecone
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index("farmer-chatbot")
+
+# Hugging Face API Configuration
+HF_API_KEY = os.environ.get("HF_API_KEY")
+HF_MODEL_ID = "intfloat/multilingual-e5-base"
+HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
 
 app = Flask(__name__)
 
@@ -27,14 +33,20 @@ def get_language_from_query(query):
         return 'en'  # Default to English if detection fails
 
 def get_embeddings_from_hf(text):
-    """Get embeddings from Google text-embedding-004"""
+    """Get embeddings from Hugging Face API using intfloat/multilingual-e5-base"""
     try:
-        print(f"[DEBUG] Calling Google text-embedding-004 for embeddings...")
-        response = genai.embed_content(
-            model="models/text-embedding-004",
-            content=f"query: {text}"
-        )
-        embedding = response['embedding']
+        print(f"[DEBUG] Calling Hugging Face API for embeddings...")
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        payload = {"inputs": f"query: {text}"}
+        
+        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        
+        if response.status_code != 200:
+            print(f"[ERROR] Hugging Face API error: {response.status_code} - {response.text}")
+            return None
+        
+        result = response.json()
+        embedding = result[0] if isinstance(result, list) else result
         print(f"[DEBUG] Embedding size: {len(embedding)}")
         return embedding
     except Exception as e:
