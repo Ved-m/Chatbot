@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from pinecone import Pinecone
-import requests
+from huggingface_hub import InferenceClient
 import os
 from langdetect import detect
 
@@ -12,9 +12,11 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index("farmer-chatbot")
 
-# Hugging Face API for embeddings
-HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
-HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-base"
+# Initialize Hugging Face Inference Client
+hf_client = InferenceClient(
+    provider="hf-inference",
+    api_key=os.environ.get("HUGGINGFACE_API_KEY")
+)
 
 app = Flask(__name__)
 
@@ -32,37 +34,25 @@ def get_language_from_query(query):
         return 'en'  # Default to English if detection fails
 
 def get_embeddings_from_hf(text):
-    """Get embeddings from Hugging Face Inference API"""
+    """Get embeddings from Hugging Face Inference Client"""
     try:
-        print(f"[DEBUG] Calling HF API for embeddings...")
-        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        payload = {"inputs": f"query: {text}"}
-        
-        response = requests.post(
-            HF_INFERENCE_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
+        print(f"[DEBUG] Calling HF InferenceClient for embeddings...")
+        embedding = hf_client.feature_extraction(
+            f"query: {text}",
+            model="intfloat/multilingual-e5-base"
         )
+        # Returns a numpy array — convert to list for Pinecone
+        embedding_list = embedding.tolist()
         
-        print(f"[DEBUG] HF API response status: {response.status_code}")
+        # If shape is [tokens, dims], mean pool to [dims]
+        if isinstance(embedding_list[0], list):
+            embedding_list = [
+                sum(token[i] for token in embedding_list) / len(embedding_list)
+                for i in range(len(embedding_list[0]))
+            ]
         
-        if response.status_code == 200:
-            embedding = response.json()
-            
-            # multilingual-e5-base returns shape [tokens, dims]
-            # Mean pool across token dimension to get a single vector
-            if isinstance(embedding[0], list):
-                embedding = [
-                    sum(token[i] for token in embedding) / len(embedding)
-                    for i in range(len(embedding[0]))
-                ]
-            
-            print(f"[DEBUG] HF Embedding received, size: {len(embedding) if isinstance(embedding, list) else 'unknown'}")
-            return embedding
-        else:
-            print(f"[ERROR] HF API Error: {response.status_code} - {response.text}")
-            return None
+        print(f"[DEBUG] Embedding size: {len(embedding_list)}")
+        return embedding_list
     except Exception as e:
         print(f"[ERROR] Error getting embeddings: {e}")
         return None
