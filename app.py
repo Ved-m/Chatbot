@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from pinecone import Pinecone
-import requests
 import os
 from langdetect import detect
 
@@ -11,9 +10,6 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 # Initialize Pinecone
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index("farmer-chatbot")
-
-# Hugging Face API for embeddings (feature-extraction pipeline)
-HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/intfloat/multilingual-e5-base"
 
 app = Flask(__name__)
 
@@ -31,36 +27,16 @@ def get_language_from_query(query):
         return 'en'  # Default to English if detection fails
 
 def get_embeddings_from_hf(text):
-    """Get embeddings from Hugging Face feature-extraction pipeline"""
+    """Get embeddings from Google text-embedding-004"""
     try:
-        print(f"[DEBUG] Calling HF API for embeddings...")
-        headers = {"Authorization": f"Bearer {os.environ.get('HUGGINGFACE_API_KEY')}"}
-        
-        response = requests.post(
-            HF_API_URL,
-            headers=headers,
-            json={"inputs": f"query: {text}"},
-            timeout=30
+        print(f"[DEBUG] Calling Google text-embedding-004 for embeddings...")
+        response = genai.embed_content(
+            model="models/text-embedding-004",
+            content=f"query: {text}"
         )
-        
-        if response.status_code == 200:
-            embedding = response.json()
-            
-            if isinstance(embedding, list) and isinstance(embedding[0], list):
-                if isinstance(embedding[0][0], list):
-                    embedding = embedding[0]
-                
-                embedding = [
-                    sum(tok[i] for tok in embedding) / len(embedding)
-                    for i in range(len(embedding[0]))
-                ]
-                
-            print(f"[DEBUG] Embedding size: {len(embedding)}")
-            return embedding
-        else:
-            print(f"[ERROR] HF API: {response.status_code} - {response.text}")
-            return None
-            
+        embedding = response['embedding']
+        print(f"[DEBUG] Embedding size: {len(embedding)}")
+        return embedding
     except Exception as e:
         print(f"[ERROR] {e}")
         return None
