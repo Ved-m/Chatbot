@@ -4,6 +4,11 @@ from pinecone import Pinecone
 import requests
 import os
 from langdetect import detect
+try:
+    from sentence_transformers import SentenceTransformer
+    HAS_LOCAL_MODEL = True
+except:
+    HAS_LOCAL_MODEL = False
 
 # Configure the Gemini API key
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
@@ -15,6 +20,17 @@ index = pc.Index("farmer-chatbot")
 # Hugging Face API for embeddings
 HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-base"
+
+# Try to load embedding model
+embedding_model = None
+if HAS_LOCAL_MODEL:
+    try:
+        print("[INFO] Loading embedding model...")
+        embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        print("[INFO] Embedding model loaded successfully")
+    except Exception as e:
+        print(f"[WARNING] Could not load local embedding model: {e}")
+        print("[INFO] Will try Hugging Face API instead")
 
 app = Flask(__name__)
 
@@ -32,12 +48,20 @@ def get_language_from_query(query):
         return 'en'  # Default to English if detection fails
 
 def get_embeddings_from_hf(text):
-    """Get embeddings from Hugging Face Inference API"""
+    """Get embeddings from Hugging Face Inference API or local model"""
     try:
+        # Try local model first if available
+        if embedding_model is not None:
+            print(f"[DEBUG] Using local embedding model...")
+            embedding = embedding_model.encode(text).tolist()
+            print(f"[DEBUG] Local embedding received, size: {len(embedding)}")
+            return embedding
+        
+        # Fallback to HF API
+        print(f"[DEBUG] Calling HF API for embeddings...")
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
         payload = {"inputs": text}
         
-        print(f"[DEBUG] Calling HF API for embeddings...")
         response = requests.post(
             HF_INFERENCE_API_URL,
             headers=headers,
@@ -49,13 +73,13 @@ def get_embeddings_from_hf(text):
         
         if response.status_code == 200:
             embedding = response.json()
-            print(f"[DEBUG] Embedding received, size: {len(embedding) if isinstance(embedding, list) else 'unknown'}")
+            print(f"[DEBUG] HF Embedding received, size: {len(embedding) if isinstance(embedding, list) else 'unknown'}")
             return embedding
         else:
-            print(f"[ERROR] HF API Error: {response.status_code} - {response.text}")
+            print(f"[ERROR] HF API Error: {response.status_code}")
             return None
     except Exception as e:
-        print(f"[ERROR] Error getting embeddings from HF: {e}")
+        print(f"[ERROR] Error getting embeddings: {e}")
         return None
 
 def get_context_from_pinecone(query, k=4):

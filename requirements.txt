@@ -4,3 +4,4 @@ gunicorn
 pinecone
 langdetect
 requests
+sentence-transformers
