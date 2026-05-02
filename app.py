@@ -1,63 +1,93 @@
 from flask import Flask, request, jsonify
 from sentence_transformers import SentenceTransformer
-import pandas as pd
-import numpy as np
 import google.generativeai as genai
+from pinecone import Pinecone
 import os
+from langdetect import detect
 
 # Configure the Gemini API key
-# Make sure to set the GOOGLE_API_KEY environment variable
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY", "AIzaSyAwelgXppb7UKthPZiZJHtgvb-7jaPeCIM"))
+
+# Initialize Pinecone
+pc = Pinecone(api_key="pcsk_ndfXW_41qtC3o8TH7ptb2PqHmuRjd6UTMF5zqkAQP4pszwBWfWLYDzXx9dKqncyHNrNxZ")
+index = pc.Index("farmer-chatbot")
+
+# Initialize the embedding model
+model = SentenceTransformer('intfloat/multilingual-e5-base')
 
 app = Flask(__name__)
 
-# Load the data and create embeddings
-@app.before_first_request
-def load_model_and_data():
-    global model, df, embeddings
-    model = SentenceTransformer('BAAI/bge-small-en-v1.5')
-    df = pd.read_csv('Cleaned_CropMaster_QA.csv')
-    # Ensure the 'Answer' column is of type string
-    df['Answer'] = df['Answer'].astype(str)
-    embeddings = model.encode(df['Question'].tolist(), convert_to_tensor=True)
-    print("Model and data loaded.")
+def get_language_from_query(query):
+    """Detect the language of the user's query"""
+    try:
+        lang = detect(query)
+        return lang
+    except:
+        return 'en'  # Default to English if detection fails
 
-def find_top_k_matches(query, k=4):
-    query_embedding = model.encode(query, convert_to_tensor=True)
-    cos_scores = util.pytorch_cos_sim(query_embedding, embeddings)[0]
-    top_k_indices = np.argpartition(-cos_scores, range(k))[:k]
-    return df.iloc[top_k_indices]
+def get_context_from_pinecone(query, k=4):
+    """Query Pinecone to get top 4 relevant results"""
+    try:
+        # Create embedding for the query
+        query_embedding = model.encode(query).tolist()
+        
+        # Query Pinecone for top k results
+        results = index.query(
+            vector=query_embedding,
+            top_k=k,
+            include_metadata=True
+        )
+        
+        # Extract context from results
+        context = ""
+        for match in results['matches']:
+            metadata = match.get('metadata', {})
+            question = metadata.get('question', '')
+            answer = metadata.get('answer', '')
+            context += f"Q: {question}\nA: {answer}\n\n"
+        
+        return context
+    except Exception as e:
+        print(f"Error querying Pinecone: {e}")
+        return ""
 
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
     user_query = data.get('query')
-    user_lang = data.get('language', 'en') # Default to English
+    user_lang = data.get('language', '')  # User's preferred language
 
     if not user_query:
         return jsonify({"error": "Query is required"}), 400
 
-    # Find relevant context
-    top_matches = find_top_k_matches(user_query)
-    context = "\n".join([f"Q: {row['Question']}\nA: {row['Answer']}" for index, row in top_matches.iterrows()])
-
-    # Generate response using Gemini
     try:
-        gemini_model = genai.GenerativeModel('gemini-pro')
-        prompt = f"""You are a helpful assistant for Grape Master. 
-        Answer the user's question based on the following context.
-        The user is asking in {user_lang}. Your response should be in {user_lang}.
-
-        Context:
+        # Detect the language of the query if not provided
+        if not user_lang:
+            user_lang = get_language_from_query(user_query)
+        
+        # Get relevant context from Pinecone
+        context = get_context_from_pinecone(user_query, k=4)
+        
+        # Generate response using Gemini 2.5 Flash
+        gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = f"""You are a helpful assistant for Grape Master (a farming and agriculture chatbot).
+        Answer the user's question based on the following context from the knowledge base.
+        The user is asking in the language code '{user_lang}'. Your response MUST be in the same language as the user's query.
+        
+        Knowledge Base Context:
         {context}
-
+        
         User Question: {user_query}
-
-        Answer:"""
+        
+        Provide a helpful and accurate answer based on the context above. If the context doesn't have relevant information, provide the best answer you can based on your knowledge."""
         
         response = gemini_model.generate_content(prompt)
         
-        return jsonify({"response": response.text})
+        return jsonify({
+            "response": response.text,
+            "detected_language": user_lang
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

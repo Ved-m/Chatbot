@@ -4,3 +4,5 @@ pandas
 numpy
 google-generativeai
 gunicorn
+pinecone-client
+langdetect
