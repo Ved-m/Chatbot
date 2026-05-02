@@ -14,7 +14,7 @@ index = pc.Index("farmer-chatbot")
 
 # Hugging Face API for embeddings
 HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
-HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/intfloat/multilingual-e5-base"
+HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-base"
 
 app = Flask(__name__)
 
@@ -49,10 +49,19 @@ def get_embeddings_from_hf(text):
         
         if response.status_code == 200:
             embedding = response.json()
+            
+            # multilingual-e5-base returns shape [tokens, dims]
+            # Mean pool across token dimension to get a single vector
+            if isinstance(embedding[0], list):
+                embedding = [
+                    sum(token[i] for token in embedding) / len(embedding)
+                    for i in range(len(embedding[0]))
+                ]
+            
             print(f"[DEBUG] HF Embedding received, size: {len(embedding) if isinstance(embedding, list) else 'unknown'}")
             return embedding
         else:
-            print(f"[ERROR] HF API Error: {response.status_code}")
+            print(f"[ERROR] HF API Error: {response.status_code} - {response.text}")
             return None
     except Exception as e:
         print(f"[ERROR] Error getting embeddings: {e}")
@@ -127,15 +136,14 @@ def chat():
         gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = f"""You are a helpful assistant for Grape Master (a farming and agriculture chatbot).
-        Answer the user's question based on the following context from the knowledge base.
-        The user is asking in the language code '{user_lang}'. Your response MUST be in the same language as the user's query.
-        
-        Knowledge Base Context:
-        {context}
-        
-        User Question: {user_query}
-        
-        Provide a helpful and accurate answer based on the context above. If the context doesn't have relevant information, provide the best answer you can based on your knowledge."""
+Answer in the SAME language as the user's question — detect it from the query text itself.
+
+Knowledge Base Context:
+{context}
+
+User Question: {user_query}
+
+Provide a helpful and accurate answer based on the context above."""
         
         print(f"[DEBUG] Prompt being sent to Gemini:")
         print(f"[DEBUG] ==========================================")
