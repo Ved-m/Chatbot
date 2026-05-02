@@ -14,8 +14,7 @@ index = pc.Index("farmer-chatbot")
 
 # Hugging Face API for embeddings
 HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
-HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction"
-HF_MODEL_ID = "intfloat/multilingual-e5-base"
+HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-base"
 
 app = Flask(__name__)
 
@@ -36,17 +35,13 @@ def get_embeddings_from_hf(text):
     """Get embeddings from Hugging Face Inference API"""
     try:
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        payload = {
-            "inputs": text,
-            "options": {"use_cache": False}
-        }
+        payload = {"inputs": text}
         
         print(f"[DEBUG] Calling HF API for embeddings...")
         response = requests.post(
             HF_INFERENCE_API_URL,
             headers=headers,
             json=payload,
-            params={"model": HF_MODEL_ID},
             timeout=30
         )
         
