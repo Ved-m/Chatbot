@@ -6,10 +6,10 @@ import os
 from langdetect import detect
 
 # Configure the Gemini API key
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY", "AIzaSyAwelgXppb7UKthPZiZJHtgvb-7jaPeCIM"))
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 # Initialize Pinecone
-pc = Pinecone(api_key="pcsk_ndfXW_41qtC3o8TH7ptb2PqHmuRjd6UTMF5zqkAQP4pszwBWfWLYDzXx9dKqncyHNrNxZ")
+pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index("farmer-chatbot")
 
 # Initialize the embedding model
