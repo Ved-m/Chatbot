@@ -65,26 +65,39 @@ def get_context_from_pinecone(query, k=4):
         query_embedding = get_embeddings_from_hf(query)
         
         if not query_embedding:
+            print("[ERROR] Failed to get embedding from HF API")
             return ""
         
         # Query Pinecone for top k results
+        print(f"[DEBUG] Querying Pinecone for top {k} results...")
         results = index.query(
             vector=query_embedding,
             top_k=k,
             include_metadata=True
         )
         
+        print(f"[DEBUG] Pinecone returned {len(results['matches'])} matches")
+        
         # Extract context from results
         context = ""
-        for match in results['matches']:
+        for i, match in enumerate(results['matches']):
             metadata = match.get('metadata', {})
             question = metadata.get('question', '')
             answer = metadata.get('answer', '')
+            score = match.get('score', 0)
+            print(f"[DEBUG] Match {i+1}: Score={score:.4f}")
+            print(f"[DEBUG]   Q: {question[:100]}..." if len(question) > 100 else f"[DEBUG]   Q: {question}")
+            print(f"[DEBUG]   A: {answer[:150]}..." if len(answer) > 150 else f"[DEBUG]   A: {answer}")
             context += f"Q: {question}\nA: {answer}\n\n"
+        
+        print(f"[DEBUG] Final context length: {len(context)} characters")
+        print(f"[DEBUG] Context preview (first 300 chars):\n{context[:300]}")
         
         return context
     except Exception as e:
-        print(f"Error querying Pinecone: {e}")
+        print(f"[ERROR] Error querying Pinecone: {e}")
+        import traceback
+        traceback.print_exc()
         return ""
 
 @app.route('/chat', methods=['POST'])
@@ -124,8 +137,13 @@ def chat():
         
         Provide a helpful and accurate answer based on the context above. If the context doesn't have relevant information, provide the best answer you can based on your knowledge."""
         
+        print(f"[DEBUG] Prompt being sent to Gemini:")
+        print(f"[DEBUG] ==========================================")
+        print(f"[DEBUG] {prompt[:500]}...")
+        print(f"[DEBUG] ==========================================")
+        
         response = gemini_model.generate_content(prompt)
-        print(f"[DEBUG] Response generated successfully")
+        print(f"[DEBUG] Response generated successfully: {response.text[:200]}...")
         
         return jsonify({
             "response": response.text,
