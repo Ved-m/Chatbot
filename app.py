@@ -19,6 +19,11 @@ HF_MODEL_ID = "intfloat/multilingual-e5-base"
 
 app = Flask(__name__)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "ok", "message": "Grape Master chatbot is running!"})
+
 def get_language_from_query(query):
     """Detect the language of the user's query"""
     try:
@@ -124,4 +129,5 @@ def chat():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
