@@ -19,14 +19,14 @@ index = pc.Index("farmer-chatbot")
 
 # Hugging Face API for embeddings
 HF_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
-HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-base"
+HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/intfloat/multilingual-e5-base"
 
 # Try to load embedding model
 embedding_model = None
 if HAS_LOCAL_MODEL:
     try:
         print("[INFO] Loading embedding model...")
-        embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        embedding_model = SentenceTransformer('intfloat/multilingual-e5-base')
         print("[INFO] Embedding model loaded successfully")
     except Exception as e:
         print(f"[WARNING] Could not load local embedding model: {e}")
@@ -52,15 +52,15 @@ def get_embeddings_from_hf(text):
     try:
         # Try local model first if available
         if embedding_model is not None:
-            print(f"[DEBUG] Using local embedding model...")
-            embedding = embedding_model.encode(text).tolist()
+            print(f"[DEBUG] Using local embedding model (multilingual-e5-base)...")
+            embedding = embedding_model.encode(f"query: {text}").tolist()
             print(f"[DEBUG] Local embedding received, size: {len(embedding)}")
             return embedding
         
         # Fallback to HF API
         print(f"[DEBUG] Calling HF API for embeddings...")
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        payload = {"inputs": text}
+        payload = {"inputs": f"query: {text}"}
         
         response = requests.post(
             HF_INFERENCE_API_URL,
