@@ -1,6 +1,6 @@
-Flask==3.1.0
-google-generativeai==0.6.1
-gunicorn==23.0.0
-pinecone==4.1.2
-langdetect==1.0.9
-requests==2.32.0
+Flask>=3.0.0
+google-generativeai>=0.8.0
+gunicorn>=21.2.0
+pinecone>=3.0.0
+langdetect>=1.0.9
+requests>=2.31.0
