@@ -4,6 +4,7 @@ from pinecone import Pinecone
 import os
 from langdetect import detect
 import requests
+import time
 
 # Configure the Gemini API key
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
@@ -16,6 +17,11 @@ index = pc.Index("farmer-chatbot")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 HF_MODEL_ID = "intfloat/multilingual-e5-base"
 HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
+
+# Request timeout configuration
+REQUEST_TIMEOUT = 30  # seconds
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
 
 app = Flask(__name__)
 
@@ -33,28 +39,64 @@ def get_language_from_query(query):
         return 'en'  # Default to English if detection fails
 
 def get_embeddings_from_hf(text):
-    """Get embeddings from Hugging Face API using intfloat/multilingual-e5-base"""
+    """Get embeddings from Hugging Face API using intfloat/multilingual-e5-base with retry logic"""
     try:
         print(f"[DEBUG] Calling Hugging Face API for embeddings...")
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
         payload = {"inputs": f"query: {text}"}
         
-        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        # Retry logic for robustness
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = requests.post(
+                    HF_API_URL, 
+                    headers=headers, 
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    embedding = result[0] if isinstance(result, list) else result
+                    print(f"[DEBUG] Embedding size: {len(embedding)}")
+                    return embedding
+                
+                elif response.status_code == 503:
+                    # Model is loading, retry
+                    if attempt < MAX_RETRIES - 1:
+                        print(f"[DEBUG] Model loading, retrying in {RETRY_DELAY}s (attempt {attempt + 1}/{MAX_RETRIES})...")
+                        time.sleep(RETRY_DELAY)
+                        continue
+                    else:
+                        print(f"[ERROR] Hugging Face model still loading after {MAX_RETRIES} attempts")
+                        return None
+                else:
+                    print(f"[ERROR] Hugging Face API error: {response.status_code} - {response.text}")
+                    return None
+                    
+            except requests.exceptions.Timeout:
+                print(f"[ERROR] Request timeout (attempt {attempt + 1}/{MAX_RETRIES})")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                    continue
+                return None
+            except requests.exceptions.ConnectionError as e:
+                print(f"[ERROR] Connection error: {e} (attempt {attempt + 1}/{MAX_RETRIES})")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                    continue
+                return None
         
-        if response.status_code != 200:
-            print(f"[ERROR] Hugging Face API error: {response.status_code} - {response.text}")
-            return None
+        return None
         
-        result = response.json()
-        embedding = result[0] if isinstance(result, list) else result
-        print(f"[DEBUG] Embedding size: {len(embedding)}")
-        return embedding
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"[ERROR] Unexpected error getting embeddings: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_context_from_pinecone(query, k=4):
-    """Query Pinecone to get top 4 relevant results"""
+    """Query Pinecone to get top k relevant results"""
     try:
         # Get embedding from Hugging Face API
         query_embedding = get_embeddings_from_hf(query)
@@ -63,6 +105,10 @@ def get_context_from_pinecone(query, k=4):
             print("[ERROR] Failed to get embedding from HF API")
             return ""
         
+        # Validate embedding dimension
+        if len(query_embedding) != 768:
+            print(f"[WARNING] Unexpected embedding dimension: {len(query_embedding)}, expected 768")
+        
         # Query Pinecone for top k results
         print(f"[DEBUG] Querying Pinecone for top {k} results...")
         results = index.query(
@@ -70,6 +116,10 @@ def get_context_from_pinecone(query, k=4):
             top_k=k,
             include_metadata=True
         )
+        
+        if not results or 'matches' not in results:
+            print("[WARNING] No results returned from Pinecone")
+            return ""
         
         print(f"[DEBUG] Pinecone returned {len(results['matches'])} matches")
         
@@ -97,24 +147,38 @@ def get_context_from_pinecone(query, k=4):
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    data = request.json
-    user_query = data.get('query')
-    user_lang = data.get('language', '')  # User's preferred language
-
-    if not user_query:
-        return jsonify({"error": "Query is required"}), 400
-
+    """Chat endpoint for processing user queries"""
     try:
+        data = request.json
+        
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+        
+        user_query = data.get('query', '').strip()
+        user_lang = data.get('language', '').strip()
+
+        if not user_query:
+            return jsonify({"error": "Query is required and cannot be empty"}), 400
+
         print(f"[DEBUG] Received query: {user_query}")
         
         # Detect the language of the query if not provided
         if not user_lang:
-            user_lang = get_language_from_query(user_query)
-            print(f"[DEBUG] Detected language: {user_lang}")
+            try:
+                user_lang = get_language_from_query(user_query)
+                print(f"[DEBUG] Detected language: {user_lang}")
+            except Exception as e:
+                print(f"[WARNING] Language detection failed: {e}, defaulting to English")
+                user_lang = 'en'
         
         # Get relevant context from Pinecone
         print("[DEBUG] Getting context from Pinecone...")
         context = get_context_from_pinecone(user_query, k=4)
+        
+        if not context:
+            print("[WARNING] No relevant context found in Pinecone, proceeding with Gemini")
+            context = "No specific knowledge base context available."
+        
         print(f"[DEBUG] Context retrieved: {len(context)} characters")
         
         # Generate response using Gemini 2.5 Flash
@@ -129,21 +193,26 @@ Knowledge Base Context:
 
 User Question: {user_query}
 
-Provide a helpful and accurate answer based on the context above."""
+Provide a helpful and accurate answer based on the context above. If the context doesn't contain relevant information, provide your best general knowledge answer."""
         
-        print(f"[DEBUG] Prompt being sent to Gemini:")
-        print(f"[DEBUG] ==========================================")
-        print(f"[DEBUG] {prompt[:500]}...")
-        print(f"[DEBUG] ==========================================")
-        
+        print(f"[DEBUG] Generating Gemini response...")
         response = gemini_model.generate_content(prompt)
-        print(f"[DEBUG] Response generated successfully: {response.text[:200]}...")
+        
+        if not response or not response.text:
+            return jsonify({"error": "Failed to generate response from Gemini"}), 500
+        
+        print(f"[DEBUG] Response generated successfully")
         
         return jsonify({
             "response": response.text,
-            "detected_language": user_lang
+            "detected_language": user_lang,
+            "context_found": len(context) > 0
         })
 
+    except ValueError as ve:
+        error_msg = f"Invalid request: {str(ve)}"
+        print(f"[ERROR] ValueError: {error_msg}")
+        return jsonify({"error": error_msg}), 400
     except Exception as e:
         error_msg = str(e)
         print(f"[ERROR] Exception occurred: {error_msg}")
@@ -152,5 +221,19 @@ Provide a helpful and accurate answer based on the context above."""
         return jsonify({"error": f"Server error: {error_msg}"}), 500
 
 if __name__ == '__main__':
+    # Validate required environment variables
+    required_env_vars = ["GOOGLE_API_KEY", "PINECONE_API_KEY", "HF_API_KEY"]
+    missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+    
+    if missing_vars:
+        print(f"[ERROR] Missing required environment variables: {', '.join(missing_vars)}")
+        print("[ERROR] Please set the following environment variables:")
+        for var in missing_vars:
+            print(f"  - {var}")
+        exit(1)
+    
+    print("[INFO] All required environment variables are set")
+    print("[INFO] Starting Grape Master chatbot server...")
+    
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
