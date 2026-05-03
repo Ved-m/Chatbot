@@ -181,9 +181,9 @@ def chat():
         
         print(f"[DEBUG] Context retrieved: {len(context)} characters")
         
-        # Generate response using Gemini 2.5 Flash
+        # Generate response using Gemini 1.5 Flash
         print("[DEBUG] Generating response with Gemini...")
-        gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""You are a helpful assistant for Grape Master (a farming and agriculture chatbot).
 Answer in the SAME language as the user's question — detect it from the query text itself.
