@@ -16,7 +16,7 @@ index = pc.Index("farmer-chatbot")
 # Hugging Face API Configuration
 HF_API_KEY = os.environ.get("HF_API_KEY")
 HF_MODEL_ID = "intfloat/multilingual-e5-base"
-HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
+HF_API_URL = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{HF_MODEL_ID}"
 
 # Request timeout configuration
 REQUEST_TIMEOUT = 30  # seconds
@@ -183,7 +183,7 @@ def chat():
         
         # Generate response using Gemini 1.5 Flash
         print("[DEBUG] Generating response with Gemini...")
-        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        gemini_model = genai.GenerativeModel('models/gemini-1.5-flash')
         
         prompt = f"""You are a helpful assistant for Grape Master (a farming and agriculture chatbot).
 Answer in the SAME language as the user's question — detect it from the query text itself.
